@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DioFold</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗺️</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" />
+  </head>
+  <body data-theme="dark">
+    <div id="stage"></div>
+
+    <header class="panel topbar">
+      <div class="brand"><span class="logo">🗺️</span><b>DioFold</b></div>
+      <div class="group"><select id="pack" title="World pack"></select></div>
+      <div class="group">
+        <button id="undo" title="Undo (Ctrl+Z)">↶</button>
+        <button id="redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+      </div>
+      <div class="group">
+        <button id="gen" class="wide" title="Generate this layer (G)">🎲 <span>Generate</span></button>
+        <button id="clear" class="wide" title="Reset this layer to blank">🧹 <span>Clear</span></button>
+      </div>
+      <div class="group" id="skins"></div>
+      <div class="group">
+        <button id="save" title="Download world (.json)">💾</button>
+        <button id="load" title="Open world (.json)">📂</button>
+        <button id="png" title="Export this layer as PNG">🖼️</button>
+        <button id="mute" title="Sound on/off (M)">🔊</button>
+      </div>
+    </header>
+
+    <nav class="panel tools" id="tools"></nav>
+    <aside class="panel layers" id="layers"></aside>
+    <footer class="panel palette" id="palette"></footer>
+    <div class="panel sizer" id="sizer"></div>
+    <div class="panel viewctl" id="viewctl">
+      <button id="rotl" title="Turn the map left (Shift+Q)">⟲</button>
+      <span class="compass" title="North">⬆</span>
+      <button id="rotr" title="Turn the map right (Q)">⟳</button>
+    </div>
+    <div class="hud" id="hud"></div>
+    <div class="banner" id="banner"></div>
+    <div class="toast" id="toast"></div>
+    <input type="file" id="file" accept=".json,application/json" hidden />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

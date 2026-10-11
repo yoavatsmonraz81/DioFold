@@ -1,0 +1,10 @@
+node_modules
+dist
+forge-raw
+__pycache__/
+*.tmp
+
+# world packs (definitions + forged art) stay local; un-ignore one with !src/packs/<id>/ to share it
+src/packs/*/
+public/packs/*/
+tools/forge/samples/
