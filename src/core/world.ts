@@ -1,15 +1,18 @@
+import type { Bridge } from './bridges';
 import { LAYER_IDS, type LayerId } from './layers';
 
 export interface Cell {
   t: string; // terrain id
   h: number; // height level
   p?: string; // prop id
+  b?: Bridge; // a bridge deck over this cell
 }
 
 export type CellListener = (layer: LayerId, x: number, y: number, before: Cell | null, after: Cell | null) => void;
 export type Recorder = (layer: LayerId, i: number, before: Cell | null, after: Cell | null) => void;
 
-type SavedCell = 0 | [string, number] | [string, number, string];
+type SavedBridge = [string, number, 0 | 1];
+type SavedCell = 0 | [string, number] | [string, number, string] | [string, number, string | 0, SavedBridge];
 export interface SavedWorld {
   v: 1;
   w: number;
@@ -19,8 +22,9 @@ export interface SavedWorld {
   fp?: 1; // saved since props got footprints (older saves get their overlaps tidied on load)
 }
 
+const sameBridge = (a?: Bridge, b?: Bridge) => a === b || (!!a && !!b && a.k === b.k && a.h === b.h && a.a === b.a);
 const sameCell = (a: Cell | null, b: Cell | null) =>
-  a === b || (!!a && !!b && a.t === b.t && a.h === b.h && a.p === b.p);
+  a === b || (!!a && !!b && a.t === b.t && a.h === b.h && a.p === b.p && sameBridge(a.b, b.b));
 
 export class World {
   layers: Record<LayerId, (Cell | null)[]>;
@@ -53,7 +57,7 @@ export class World {
     const i = y * this.w + x;
     const before = this.layers[layer][i];
     if (sameCell(before, cell)) return false;
-    const after = cell ? { ...cell } : null;
+    const after = cell ? { ...cell, ...(cell.b ? { b: { ...cell.b } } : {}) } : null;
     this.layers[layer][i] = after;
     if (record) this.recorder?.(layer, i, before, after);
     for (const fn of this.listeners) fn(layer, x, y, before, after);
@@ -63,7 +67,7 @@ export class World {
   toJSON(): SavedWorld {
     const layers = {} as SavedWorld['layers'];
     for (const id of LAYER_IDS) {
-      layers[id] = this.layers[id].map((c) => (!c ? 0 : c.p ? [c.t, c.h, c.p] : [c.t, c.h]));
+      layers[id] = this.layers[id].map((c) => (!c ? 0 : c.b ? [c.t, c.h, c.p ?? 0, [c.b.k, c.b.h, c.b.a]] : c.p ? [c.t, c.h, c.p] : [c.t, c.h]));
     }
     const tile = Object.fromEntries(LAYER_IDS.filter((id) => this.tile[id] !== 1).map((id) => [id, this.tile[id]]));
     return { v: 1, fp: 1, w: this.w, h: this.h, layers, ...(Object.keys(tile).length ? { tile } : {}) };
@@ -77,7 +81,11 @@ export class World {
       const src = data.layers[id] ?? [];
       world.layers[id] = world.layers[id].map((_, i) => {
         const c = src[i];
-        return c ? (c[2] ? { t: c[0], h: c[1], p: c[2] } : { t: c[0], h: c[1] }) : null;
+        if (!c) return null;
+        const cell: Cell = { t: c[0], h: c[1] };
+        if (c[2]) cell.p = c[2];
+        if (c.length === 4 && c[3]) cell.b = { k: c[3][0], h: c[3][1], a: c[3][2] };
+        return cell;
       });
       const t = data.tile?.[id];
       if (typeof t === 'number' && t > 0) world.tile[id] = t;

@@ -1,4 +1,5 @@
-import { anchorFor, footCells, occupant, propSize, type Occupant } from './footprint';
+import { bridgeCells, bridgeFits, bridgeLine, deckHeight } from './bridges';
+import { anchorFor, footCells, occupant, propSize, type Occupant, type Pt } from './footprint';
 import { MAX_H } from './geometry';
 import { LAYER_IDS, type LayerId } from './layers';
 import { PROPS, propFits } from './props';
@@ -15,7 +16,9 @@ export function paintedHeight(tId: string, cur: Cell | null): number {
 
 function removeProp(world: World, layer: LayerId, o: Occupant): boolean {
   const c = world.get(layer, o.x, o.y);
-  return !!c && world.set(layer, o.x, o.y, { t: c.t, h: c.h });
+  if (!c) return false;
+  const { p: _gone, ...rest } = c;
+  return world.set(layer, o.x, o.y, rest);
 }
 
 export function paintCell(world: World, layer: LayerId, x: number, y: number, tId: string): boolean {
@@ -25,6 +28,7 @@ export function paintCell(world: World, layer: LayerId, x: number, y: number, tI
   // ground under a big prop stays level with the rest of its footprint
   const h = occ && occ.nx * occ.ny > 1 && cur && T.fixedH === undefined ? cur.h : paintedHeight(tId, cur);
   const next: Cell = { t: T.id, h };
+  if (cur?.b) next.b = cur.b; // bridges stay put when the ground under them changes
   let changed = false;
   if (occ && !propFits(PROPS[occ.p], T)) {
     if (occ.x !== x || occ.y !== y) changed = removeProp(world, layer, occ);
@@ -47,8 +51,9 @@ export function nudgeHeight(world: World, layer: LayerId, x: number, y: number, 
   return changed;
 }
 
-/** Erases a cell, taking down any prop that was standing on it. */
+/** Erases a cell, taking down any prop that was standing on it. A bridge goes first, all of it. */
 export function eraseCell(world: World, layer: LayerId, x: number, y: number): boolean {
+  if (world.get(layer, x, y)?.b) return removeBridge(world, layer, x, y);
   const occ = occupant(world, layer, x, y);
   const changed = !!occ && (occ.x !== x || occ.y !== y) && removeProp(world, layer, occ);
   return world.set(layer, x, y, null) || changed;
@@ -62,7 +67,8 @@ export function propPlacement(world: World, layer: LayerId, x: number, y: number
   const cells = footCells(a.x, a.y, nx, ny);
   const fits = cells.every((c) => {
     const cell = world.get(layer, c.x, c.y);
-    return !!cell && propFits(P, terrain(cell.t));
+    // on a bridge deck anything that stands on land will do, whatever flows underneath
+    return !!cell && (cell.b ? !P.onWater : propFits(P, terrain(cell.t)));
   });
   return { anchor: a, cells, big: nx * ny > 1, fits };
 }
@@ -86,7 +92,7 @@ export function placeProp(world: World, layer: LayerId, x: number, y: number, pI
   const same = occs.size === 1 && [...occs.values()].every((o) => o.x === anchor.x && o.y === anchor.y && o.p === pId);
   if (same || (!replace && occs.size)) return false;
   for (const o of occs.values()) removeProp(world, layer, o);
-  if (big) {
+  if (big && !PROPS[pId].flies) {
     const level = world.get(layer, x, y)!.h;
     for (const c of cells) {
       const cur = world.get(layer, c.x, c.y)!;
@@ -122,6 +128,30 @@ export function tidyProps(world: World): number {
     }
   }
   return removed;
+}
+
+/** Lays a bridge in a straight line from one cell towards another, clearing what stood in the way. */
+export function buildBridge(world: World, layer: LayerId, from: Pt, to: Pt, kind: string): boolean {
+  const { cells, a } = bridgeLine(from, to);
+  if (!bridgeFits(world, layer, cells)) return false;
+  const h = deckHeight(world, layer, cells);
+  let changed = false;
+  for (const c of cells) {
+    const occ = occupant(world, layer, c.x, c.y);
+    if (occ) changed = removeProp(world, layer, occ) || changed;
+    changed = world.set(layer, c.x, c.y, { ...world.get(layer, c.x, c.y)!, b: { k: kind, h, a } }) || changed;
+  }
+  return changed;
+}
+
+/** Takes away the whole bridge running through (x, y), and anything standing on it. */
+export function removeBridge(world: World, layer: LayerId, x: number, y: number): boolean {
+  let changed = false;
+  for (const c of bridgeCells(world, layer, x, y)) {
+    const { b: _bridge, p: _onIt, ...rest } = world.get(layer, c.x, c.y)!;
+    changed = world.set(layer, c.x, c.y, rest) || changed;
+  }
+  return changed;
 }
 
 /** Flood-fills the contiguous region matching the start cell's terrain. */

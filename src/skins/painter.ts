@@ -537,7 +537,7 @@ export function paintProp(P: PropDef, variant: number, frame: number, st: PaintS
   ctx.translate(ax, ay);
   const pen = new Pen(ctx, st, mulberry32(hashStr(P.id) + variant * 104729 + 7));
   const look = P.look ?? P.id;
-  if (look !== 'boat') pen.ellipse(0, 0, 11, 5, 'rgba(0,0,0,0.18)');
+  if (look !== 'boat' && !P.flies) pen.ellipse(0, 0, 11, 5, 'rgba(0,0,0,0.18)');
   PROP_PAINTERS[look]?.(pen, variant, frame);
   return { canvas, ax: ax * scale, ay: ay * scale };
 }

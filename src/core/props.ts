@@ -8,6 +8,7 @@ export interface PropDef {
   onWater?: boolean; // sits on foam-y liquids instead of land
   animated?: boolean;
   bob?: boolean;
+  flies?: boolean; // airborne: can go over any tile (clouds too) and hovers above it
   look?: string; // built-in prop the procedural skins draw this as
   foot?: number | [number, number]; // size in tiles at the pack's reference tile size: square, or [along x, along y]; see footprint.ts
   pack?: string;
@@ -41,6 +42,7 @@ export const PROPS: Record<string, PropDef> = Object.fromEntries(LIST.map((p) =>
 export const propsFor = (layer: LayerId) => LIST.filter((p) => p.layers.includes(layer));
 
 export function propFits(p: PropDef, t: TerrainDef): boolean {
+  if (p.flies) return true;
   if (t.noProps) return false;
   return p.onWater ? !!t.foam : !t.liquid;
 }

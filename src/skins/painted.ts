@@ -3,8 +3,9 @@ import type { Pack } from '../core/packs';
 import type { PropDef } from '../core/props';
 import type { TerrainDef } from '../core/terrains';
 import { hexToNum } from './color';
+import { drawBridge } from './bridge';
 import { Pen, foam, makeCanvas, roadMarks, type PaintStyle } from './painter';
-import type { PropRequest, Rendered, Skin, TileRequest } from './types';
+import type { BridgeRequest, PropRequest, Rendered, Skin, TileRequest } from './types';
 
 /** A keyed sprite: anchor normalised to the footprint centre; w0 = the object's width in the raw generation. */
 interface SpriteArt {
@@ -127,13 +128,20 @@ export class PaintedSkin implements Skin {
     // it; long footprints sit centred on the sprite's width instead, standing on the footprint like a building
     const long = Array.isArray(P.foot) && P.foot[0] !== P.foot[1];
     const ax = pad + (long ? 0.5 : a.ax) * dw, ay = pad + (long ? 1 - (0.225 * img.width) / img.height : a.ay) * dh;
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath();
-    ctx.ellipse(ax, ay, dw * 0.36, dw * 0.15, 0, 0, Math.PI * 2);
-    ctx.fill();
+    if (!P.flies) {
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(ax, ay, dw * 0.36, dw * 0.15, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, pad, pad, dw, dh);
     return { canvas, ax: ax * RES, ay: ay * RES, res: RES, view: a === main ? 0 : req.view };
+  }
+
+  /** Painterly bridges: natural colours, soft light, no ink, a little grain. */
+  renderBridge(req: BridgeRequest): Rendered {
+    return drawBridge(req, { color: (c) => c, outline: 'rgba(20,14,10,0.35)', outlineWidth: 0.6, shadeLeft: LIGHT.left, shadeRight: LIGHT.right, res: RES, grain: 1 });
   }
 
   private texPattern(ctx: CanvasRenderingContext2D, img: Img) {

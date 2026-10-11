@@ -2,7 +2,7 @@ import { anchorFor, footCells, propSize } from './footprint';
 import type { LayerId } from './layers';
 import type { GenKind, GenMapping, PackLayer } from './packs';
 import { PROPS, propFits } from './props';
-import { fbm, makeNoise, mulberry32 } from './rng';
+import { fbm, hash2, makeNoise, mulberry32 } from './rng';
 import { terrain } from './terrains';
 import type { Cell, World } from './world';
 
@@ -18,7 +18,8 @@ export function generateLayer(world: World, layer: LayerId, seed: number, kind: 
   const put: Put = (x, y, c) => {
     if (c && map) {
       const t = map.terrains[c.t] || c.t;
-      const p = c.p ? map.props[c.p] : undefined;
+      const m = c.p ? map.props[c.p] : undefined;
+      const p = Array.isArray(m) ? m[hash2(x, y, seed) % m.length] : m;
       c = p ? { t, h: c.h, p } : { t, h: c.h };
     }
     cells[y * w + x] = c ? { ...c } : null;
@@ -66,7 +67,7 @@ function settleProps(cells: (Cell | null)[], w: number, h: number, tile: number,
     for (const c of fc) {
       taken[c.y * w + c.x] = 1;
       const cell = cells[c.y * w + c.x]!;
-      if (k.n > 1 && terrain(cell.t).fixedH === undefined) cell.h = level;
+      if (k.n > 1 && !P.flies && terrain(cell.t).fixedH === undefined) cell.h = level;
     }
     cells[a.y * w + a.x]!.p = k.p;
     placed.add(k.p);
@@ -113,14 +114,20 @@ function surface(w: number, h: number, seed: number, put: Put) {
       const c = cells[y * w + x]!;
       const r = rnd();
       const nearWater = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => at(x + dx, y + dy)?.t === 'water' || at(x + dx, y + dy)?.t === 'shallows');
+      // grazer / prowler / arctic are wildlife slots: packs map them onto their animals (none built in)
       if (c.t === 'grass') {
         if (!castle && c.h >= 2 && r < 0.03) (c.p = 'castle'), (castle = true);
         else if (r < 0.07) c.p = 'tree';
         else if (r < 0.085) c.p = 'house';
         else if (r < 0.09) c.p = 'tower';
         else if (r < 0.095) c.p = 'ruins';
-      } else if (c.t === 'sand' && nearWater && r < 0.12) c.p = 'palm';
+        else if (r < 0.115) c.p = 'grazer';
+      } else if (c.t === 'forest' && r < 0.025) c.p = 'prowler';
+      else if (c.t === 'sand' && nearWater && r < 0.12) c.p = 'palm';
+      else if (c.t === 'sand' && nearWater && r < 0.14) c.p = 'shore'; // wildlife slot: something basking by the water
       else if (c.t === 'desert' && r < 0.08) c.p = 'cactus';
+      else if (c.t === 'snow' && r < 0.05) c.p = 'arctic';
+      else if (c.t === 'rock' && r < 0.015) c.p = 'flyer'; // something soaring over the mountains
       else if ((c.t === 'rock' || c.t === 'snow') && r < 0.1) c.p = c.t === 'rock' && r < 0.04 ? 'boulder' : 'pine';
       else if (c.t === 'water' && !nearWater && r < 0.008) c.p = 'boat';
       else if (c.t === 'swamp' && r < 0.06) c.p = 'mushroom';
@@ -211,7 +218,12 @@ function sky(w: number, h: number, seed: number, put: Put) {
         c = { t: 'isle', h: 2 + (isle % 2) };
         if (!housed.has(isle) && r < 0.25) (c.p = isle === 0 ? 'castle' : 'house'), housed.add(isle);
         else if (r < 0.3) c.p = r < 0.15 ? 'tree' : 'pine';
-      } else if (a > 0.66) c = { t: b > 0.62 ? 'storm' : 'cloud', h: b > 0.62 ? 2 : 1 };
+      } else if (a > 0.66) {
+        c = { t: b > 0.62 ? 'storm' : 'cloud', h: b > 0.62 ? 2 : 1 };
+        // packs can map these onto things that fly over the clouds (no built-in prop answers to them)
+        if (r < 0.012) c.p = 'giant';
+        else if (r < 0.05) c.p = 'flyer';
+      }
       put(x, y, c);
     }
   }

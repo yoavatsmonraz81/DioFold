@@ -1,3 +1,4 @@
+import type { BridgeDef } from '../core/bridges';
 import type { LayerId } from '../core/layers';
 import type { PropDef } from '../core/props';
 import type { TerrainDef } from '../core/terrains';
@@ -29,6 +30,15 @@ export interface PropRequest {
   view: number; // 0..3: the map turned this many quarter-turns clockwise
 }
 
+export interface BridgeRequest {
+  bridge: BridgeDef;
+  deck: number; // deck height, in levels
+  ground: number; // height of what's underneath (liquids count as 0)
+  axis: 0 | 1; // on screen: 0 runs down-right, 1 runs down-left
+  cont: number; // bit0: the bridge carries on behind this cell, bit1: in front
+  variant: number;
+}
+
 /**
  * Anything that can draw tiles and props. The procedural skins implement this in code;
  * a future sprite-sheet skin (e.g. generated with ComfyUI) implements it with image lookups.
@@ -44,6 +54,7 @@ export interface Skin {
   /** Painted textures span a k×k block of cells so neighbours join seamlessly; 1 = no regions. */
   regionGrid?(terrain: TerrainDef, tile: number): number;
   renderProp(req: PropRequest): Rendered;
+  renderBridge(req: BridgeRequest): Rendered;
   /** Maps a base colour through the skin (for particles and UI accents). */
   tint(hex: string): number;
   /** Optional tiling background overlay, drawn in white/black with low alpha. */

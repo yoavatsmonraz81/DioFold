@@ -1,4 +1,5 @@
-import { eraseCell, floodFill, nudgeHeight, paintCell, placeProp, propPlacement, tidyProps } from './core/edit';
+import { BRIDGES, BRIDGE_LIST, bridgeCells, bridgeFits, bridgeLine } from './core/bridges';
+import { buildBridge, eraseCell, floodFill, nudgeHeight, paintCell, placeProp, propPlacement, removeBridge, tidyProps } from './core/edit';
 import { FOOT_STEPS, TILE_SIZES, footCells, footLabel, footXY, nextStep, occupant, propSize, type Foot } from './core/footprint';
 import { clearLayer, generateLayer } from './core/generate';
 import { History } from './core/history';
@@ -15,7 +16,7 @@ import { loadPainted, type PaintedSkin } from './skins/painted';
 import type { Skin } from './skins/types';
 import { Sound } from './ui/sound';
 
-type Tool = 'paint' | 'fill' | 'raise' | 'lower' | 'prop' | 'erase' | 'pan';
+type Tool = 'paint' | 'fill' | 'raise' | 'lower' | 'prop' | 'bridge' | 'erase' | 'pan';
 interface Pt {
   x: number;
   y: number;
@@ -27,10 +28,11 @@ const TOOLS: { id: Tool; icon: string; name: string; key: string }[] = [
   { id: 'raise', icon: '⛰️', name: 'Raise ground', key: 'R' },
   { id: 'lower', icon: '🕳️', name: 'Lower ground', key: 'L' },
   { id: 'prop', icon: '🏰', name: 'Place things', key: 'P' },
+  { id: 'bridge', icon: '🌉', name: 'Build a bridge: click where it starts, then where it ends', key: 'J' },
   { id: 'erase', icon: '🧽', name: 'Erase', key: 'E' },
   { id: 'pan', icon: '✋', name: 'Pan (or right-drag / hold Space)', key: 'H' },
 ];
-const HOVER: Record<Tool, HoverMode> = { paint: 'paint', fill: 'paint', raise: 'raise', lower: 'lower', prop: 'prop', erase: 'erase', pan: 'none' };
+const HOVER: Record<Tool, HoverMode> = { paint: 'paint', fill: 'paint', raise: 'raise', lower: 'lower', prop: 'prop', bridge: 'prop', erase: 'erase', pan: 'none' };
 
 const SIZE = 32;
 const PREFS_KEY = 'wmb.prefs.v1';
@@ -102,6 +104,8 @@ export class App {
   private terrainSel = new Map<string, string>(); // `${pack}|${layer}` → terrain id
   private propSel = new Map<string, string | null>();
   private prefSkin = '';
+  private bridgeSel: string | null = 'wood';
+  private bridgeFrom: Pt | null = null; // first click of a bridge, waiting for the second
   private tidied = 0; // props removed from older saves to make room for big footprints
 
   private stroke: { visited: Set<number>; last: Pt } | null = null;
@@ -171,6 +175,10 @@ export class App {
     this.updateMute();
     this.world.onChange(() => this.scheduleSave());
     this.view.onTurned = () => this.buildSizer();
+    // the size bar, status text and (on phones) side panels sit above the palette, however tall it gets
+    const dock = () => document.body.style.setProperty('--dock', `${$('palette').offsetHeight}px`);
+    new ResizeObserver(dock).observe($('palette'));
+    dock();
     this.watchArt();
     this.toast('Drag to paint · right-drag to pan · scroll to zoom · 🎲 for a new layer', 5200);
     this.reportTidy();
@@ -180,6 +188,7 @@ export class App {
 
   setTool(t: Tool) {
     this.tool = t;
+    this.bridgeFrom = null;
     document.querySelectorAll<HTMLElement>('#tools [data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     document.body.classList.toggle('can-grab', t === 'pan');
     this.buildPalette();
@@ -293,7 +302,10 @@ export class App {
   }
 
   private selectIndex(i: number) {
-    if (this.tool === 'prop') {
+    if (this.tool === 'bridge') {
+      const items = [null, ...BRIDGE_LIST.map((b) => b.id)];
+      if (i < items.length) this.bridgeSel = items[i];
+    } else if (this.tool === 'prop') {
       const items = [null, ...packProps(this.pack, this.layer).map((p) => p.id)];
       if (i < items.length) this.propSel.set(this.selKey, items[i]);
     } else {
@@ -361,9 +373,54 @@ export class App {
     }
   }
 
+  private cancelBridge() {
+    if (!this.bridgeFrom) return;
+    this.bridgeFrom = null;
+    this.view.setHover([]);
+    this.sound.click();
+  }
+
+  /** First click marks where a bridge starts; the second lays it (or removes one, with Remove selected). */
+  private bridgeClick(c: Pt) {
+    const { world, layer } = this;
+    if (!this.bridgeSel) {
+      this.history.begin();
+      if (removeBridge(world, layer, c.x, c.y)) this.sound.erase();
+      this.history.commit();
+      this.refreshUndo();
+      return;
+    }
+    if (!this.bridgeFrom) {
+      this.bridgeFrom = c;
+      this.sound.click();
+      this.hoverAt(c);
+      this.toast(`${BRIDGES[this.bridgeSel].name}: now click where it ends (Esc to cancel)`);
+      return;
+    }
+    const from = this.bridgeFrom;
+    if (from.x === c.x && from.y === c.y) return;
+    this.bridgeFrom = null;
+    this.history.begin();
+    const built = buildBridge(world, layer, from, c, this.bridgeSel);
+    this.history.commit();
+    this.refreshUndo();
+    if (built) this.sound.chime();
+    else this.toast('A bridge needs ground (or water) under every cell of it');
+    this.hoverAt(c);
+  }
+
   /** Shows what the current tool would touch: big props show their whole footprint (red if it won't fit). */
   private hoverAt(c: Pt | null) {
     if (!c || this.tool === 'pan') return this.view.setHover([]);
+    if (this.tool === 'bridge') {
+      if (!this.bridgeSel) {
+        const span = bridgeCells(this.world, this.layer, c.x, c.y);
+        return this.view.setHover(span.length ? span : [c], 'erase');
+      }
+      if (!this.bridgeFrom) return this.view.setHover([c], 'prop');
+      const { cells } = bridgeLine(this.bridgeFrom, c);
+      return this.view.setHover(cells, bridgeFits(this.world, this.layer, cells) ? 'prop' : 'blocked');
+    }
     const pId = this.selProp;
     if (this.tool === 'prop' && this.brush === 1) {
       if (!pId) {
@@ -458,6 +515,7 @@ export class App {
     cv.addEventListener('pointerdown', (e) => {
       this.sound.unlock();
       cv.setPointerCapture(e.pointerId);
+      if (e.button === 2 && this.bridgeFrom) return this.cancelBridge();
       if (e.button === 1 || e.button === 2 || this.tool === 'pan' || this.spaceDown) {
         this.panning = { x: e.clientX, y: e.clientY };
         document.body.classList.add('grabbing');
@@ -466,6 +524,7 @@ export class App {
       if (e.button !== 0) return;
       const c = this.view.pick(e.offsetX, e.offsetY);
       if (!c) return;
+      if (this.tool === 'bridge') return this.bridgeClick(c);
       this.history.begin();
       if (this.tool === 'fill') {
         if (floodFill(this.world, this.layer, c.x, c.y, this.selTerrain)) this.sound.chime();
@@ -490,7 +549,12 @@ export class App {
         this.stroke.last = c;
       }
     });
-    const end = () => {
+    const end = (e: PointerEvent) => {
+      // dragging from one bank to the other builds the bridge on release
+      if (this.tool === 'bridge' && this.bridgeFrom && e.type === 'pointerup' && !this.panning) {
+        const c = this.view.pick(e.offsetX, e.offsetY);
+        if (c && (c.x !== this.bridgeFrom.x || c.y !== this.bridgeFrom.y)) this.bridgeClick(c);
+      }
       if (this.stroke) {
         this.history.commit();
         this.stroke = null;
@@ -569,6 +633,8 @@ export class App {
       case 'Home':
       case '.':
         return this.view.fit();
+      case 'Escape':
+        return this.cancelBridge();
       case 'q':
         return this.rotate(1);
       case 'Q':
@@ -649,7 +715,7 @@ export class App {
     }
   }
 
-  private thumb(kind: 'terrain' | 'prop', id: string) {
+  private thumb(kind: 'terrain' | 'prop' | 'bridge', id: string) {
     const key = `${kind}|${id}`;
     let c = this.thumbs.get(key);
     if (!c) this.thumbs.set(key, (c = this.view.thumb(kind, id)));
@@ -662,19 +728,22 @@ export class App {
 
   private buildPalette() {
     const el = $('palette');
+    const scrolled = el.scrollTop;
     el.innerHTML = '';
-    const props = this.tool === 'prop';
-    const items: { id: string | null; name: string }[] = props
-      ? [{ id: null, name: 'Remove' }, ...packProps(this.pack, this.layer)]
-      : packTerrains(this.pack, this.layer);
-    const sel = props ? this.selProp : this.selTerrain;
+    const props = this.tool === 'prop', bridges = this.tool === 'bridge';
+    const items: { id: string | null; name: string }[] = bridges
+      ? [{ id: null, name: 'Remove a bridge' }, ...BRIDGE_LIST]
+      : props
+        ? [{ id: null, name: 'Remove' }, ...packProps(this.pack, this.layer)]
+        : packTerrains(this.pack, this.layer);
+    const sel = bridges ? this.bridgeSel : props ? this.selProp : this.selTerrain;
     const tile = this.world.tile[this.layer];
     items.forEach((it, i) => {
       const b = document.createElement('button');
       b.className = 'swatch';
       b.title = it.name;
       b.classList.toggle('active', it.id === sel);
-      if (it.id) b.appendChild(this.thumb(props ? 'prop' : 'terrain', it.id));
+      if (it.id) b.appendChild(this.thumb(bridges ? 'bridge' : props ? 'prop' : 'terrain', it.id));
       else b.insertAdjacentHTML('beforeend', '<div class="none">🚫</div>');
       b.insertAdjacentHTML('beforeend', `<span class="name">${it.name}</span>${i < 10 ? `<kbd>${(i + 1) % 10}</kbd>` : ''}`);
       if (props && it.id) {
@@ -684,6 +753,11 @@ export class App {
       b.onclick = () => this.selectIndex(i);
       el.appendChild(b);
     });
+    // keep the scroll position across rebuilds, but always show the selected item
+    const first = el.querySelector<HTMLElement>('.swatch');
+    if (first) el.style.setProperty('--row', `${first.offsetHeight}px`);
+    el.scrollTop = scrolled;
+    el.querySelector<HTMLElement>('.swatch.active')?.scrollIntoView({ block: 'nearest' });
     this.buildSizer();
   }
 
@@ -782,6 +856,7 @@ export class App {
     if (!c) return void (el.textContent = '');
     if (!cell) return void (el.textContent = `Empty · ${c.x}, ${c.y}`);
     const parts = [terrain(cell.t).name, `height ${cell.h}`];
+    if (cell.b) parts.push(`${BRIDGES[cell.b.k]?.name ?? 'Bridge'} (deck ${cell.b.h})`);
     const occ = occupant(this.world, this.layer, c.x, c.y);
     if (occ) parts.push(`${PROPS[occ.p]?.name ?? occ.p}${occ.nx * occ.ny > 1 ? ` (${footLabel(occ.nx, occ.ny)})` : ''}`);
     el.textContent = `${parts.join(' · ')} · ${c.x}, ${c.y}`;

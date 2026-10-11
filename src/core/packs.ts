@@ -48,13 +48,14 @@ export interface PackPropJSON {
   onWater?: boolean;
   animated?: boolean;
   bob?: boolean;
+  flies?: boolean; // airborne: placed over any tile, clouds included, and drawn hovering
   foot?: number | [number, number]; // size in tiles at tile size 1 (default 1): a palace 3, a lantern 0.5, an arch [1, 2]
   prompt?: string;
 }
 
 export interface GenMapping {
   terrains: Record<string, string>;
-  props: Record<string, string>;
+  props: Record<string, string | string[]>; // a list: each spot picks one at random
 }
 
 export interface PackJSON {
@@ -126,6 +127,7 @@ export function registerPack(json: PackJSON): Pack {
       onWater: p.onWater ?? base.onWater,
       animated: p.animated ?? base.animated,
       bob: p.bob ?? base.bob,
+      flies: p.flies ?? base.flies,
       id: ns(p.id),
       name: p.name,
       layers: p.layers,
@@ -138,10 +140,12 @@ export function registerPack(json: PackJSON): Pack {
     return def;
   });
   const mapNs = (m: Record<string, string>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v ? ns(v) : '']));
+  const mapProps = (m: Record<string, string | string[]>) =>
+    Object.fromEntries(Object.entries(m).map(([k, v]) => [k, Array.isArray(v) ? v.map(ns) : v ? ns(v) : '']));
   const generate: Pack['generate'] = {};
   for (const id of LAYER_IDS) {
     const g = json.generate?.[id];
-    if (g) generate[id] = { terrains: mapNs(g.terrains), props: mapNs(g.props) };
+    if (g) generate[id] = { terrains: mapNs(g.terrains), props: mapProps(g.props) };
   }
   const layers = Object.fromEntries(
     json.layers.map((l) => [l.id, { ...l, blank: l.blank ? { ...l.blank, t: ns(l.blank.t) } : null }]),

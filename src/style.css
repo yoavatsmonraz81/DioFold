@@ -282,10 +282,17 @@ select option {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
   gap: 6px;
   padding: 8px;
-  max-width: calc(100vw - 24px);
-  overflow-x: auto;
+  width: max-content;
+  max-width: min(calc(100vw - 24px), 1000px);
+  /* two rows show at a time; the rest scroll (--row is measured from a swatch) */
+  max-height: calc(var(--row, 84px) * 2 + 6px + 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 .swatch {
@@ -347,7 +354,7 @@ select option {
 
 /* selected prop's size */
 .sizer {
-  bottom: 118px;
+  bottom: calc(var(--dock, 96px) + 22px);
   left: 50%;
   display: flex;
   align-items: center;
@@ -439,7 +446,7 @@ select option {
 .hud {
   position: fixed;
   right: 16px;
-  bottom: 118px;
+  bottom: calc(var(--dock, 96px) + 22px);
   font-size: 12px;
   color: var(--text);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
@@ -525,7 +532,7 @@ body[data-theme='light'] .banner {
   .layers {
     width: auto;
     top: auto;
-    bottom: 118px;
+    bottom: calc(var(--dock, 96px) + 70px); /* above the size bar */
     transform: none;
   }
   .layers .txt,
@@ -546,9 +553,9 @@ body[data-theme='light'] .banner {
   .viewctl {
     right: auto;
     left: 12px;
-    bottom: 118px;
+    bottom: calc(var(--dock, 96px) + 70px);
   }
   .sizer {
-    bottom: 172px;
+    bottom: calc(var(--dock, 96px) + 18px);
   }
 }

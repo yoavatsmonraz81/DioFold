@@ -14,7 +14,8 @@ npm run build      # type-check + production build into dist/
 
 | Action | Input |
 | --- | --- |
-| Paint / Fill / Raise / Lower / Place things / Erase / Pan | `B` `F` `R` `L` `P` `E` `H` |
+| Paint / Fill / Raise / Lower / Place things / Bridge / Erase / Pan | `B` `F` `R` `L` `P` `J` `E` `H` |
+| Build a bridge | Bridge tool: click where it starts, then where it ends (or drag); `Esc` cancels |
 | Pick from palette | `1`–`9`, `0` |
 | Brush size (1×1, 3×3, 5×5) | `[` `]` (a big brush *scatters* props) |
 | Layer up / down | `W` `S` or `PageUp` `PageDown` |
@@ -30,6 +31,10 @@ With the Place tool, the bar above the palette shows the selected thing's footpr
 size; − / + resize it for the whole pack. The **Tile size** control under the layers sets how much world
 one tile holds on the current layer.
 
+**Bridges** (wooden, stone, brick) run in straight lines over water, lava or chasms. The deck sits level
+with the higher bank, the ground underneath stays as it is, and things can be placed on the deck. Erasing a
+bridge cell, or the Bridge tool's 🚫, takes the whole bridge away.
+
 The world autosaves to the browser. 💾 / 📂 download and open `.json` world files; 🖼️ exports the current layer as a PNG.
 
 ## Architecture
@@ -43,6 +48,7 @@ src/
     props.ts       placeable things (trees, castles, boats…)
     world.ts       the grid: layers → cells {terrain, height, prop}, per-layer tile size; change events; JSON save format
     footprint.ts   how many cells a prop covers (its size ÷ the layer's tile size), occupancy
+    bridges.ts     bridge kinds and straight-line spans (a bridge is a deck stored on each cell it crosses)
     history.ts     undo/redo grouped by stroke
     edit.ts        editing rules (paint keeps sculpted height, liquids are flat, flood fill…)
     generate.ts    per-layer procedural generators (islands, CA caves, magma depths, sky isles)
@@ -51,6 +57,7 @@ src/
     types.ts       the Skin interface — anything that can draw a tile or prop
     painter.ts     the shared procedural painter (all terrains & props drawn in canvas code)
     procedural.ts  ProceduralSkin = painter + PaintStyle (+ optional pixelation pass)
+    bridge.ts      draws bridge segments (piers or arches, deck, railings) for every skin
     index.ts       the skins: Storybook, Parchment, Pixel, Blueprint
   render/
     MapView.ts     PixiJS scene: texture cache, layers & ghosting, animation, picking, camera
@@ -117,8 +124,13 @@ on your machine unless you choose to share one (add a `!src/packs/<id>/` line to
    - **Layers** fill the four fixed slots (sky → deep). `generator` picks a 🎲 generator (`sky`, `surface`,
      `underground`, `deep`, `city`, `hive`, or `null`); `blank` is what 🧹 Clear fills the layer with.
    - **Terrains and props** extend a built-in `base` (see `src/core/terrains.ts` and `src/core/props.ts`).
-     `foot` is a prop's size in tiles (below). `art.top` / `prompt` / `sides` are what the forge paints.
-   - **`generate`** maps the generators' built-in ids onto yours; unmapped props are left out.
+     `foot` is a prop's size in tiles (below); `"flies": true` lets a prop go over any tile, clouds included,
+     and hover there. `art.top` / `prompt` / `sides` are what the forge paints.
+   - **`generate`** maps the generators' built-in ids onto yours; unmapped props are left out. A list
+     (`"grazer": ["zebras", "deer"]`) picks one at random per spot. Some slots have no built-in prop and
+     exist for packs to fill: `flyer` and `giant` over the sky's clouds, and on the surface the wildlife
+     slots `grazer` (meadows), `prowler` (forests), `arctic` (snow), `shore` (sand by the water) and `flyer`
+     (over mountains).
 2. **Forge the art** (optional: without it the procedural skins draw everything). Start ComfyUI, then with
    ComfyUI's Python:
 

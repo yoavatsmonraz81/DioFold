@@ -1,4 +1,5 @@
 import { AlphaFilter, Application, CanvasSource, Color, Container, Graphics, Rectangle, Sprite, Texture, TilingSprite } from 'pixi.js';
+import { BRIDGES, type Bridge } from '../core/bridges';
 import { propSize } from '../core/footprint';
 import { BASE, HZ, MAX_H, TH, TW, isoX, isoY } from '../core/geometry';
 import { LAYER_IDS, type LayerId } from '../core/layers';
@@ -14,6 +15,7 @@ const GHOST_ALPHA = 0.3;
 const FRAME_MS = 200;
 const DROP_MS = 300;
 const SPIN_MS = 520;
+const FLY_LIFT = 26; // how high flying props hover over their tile
 
 /** A vertical slice of a big prop's image, so each slice can sort at the depth of the cells it covers. */
 interface Strip {
@@ -71,6 +73,7 @@ class LayerView {
   readonly container = new Container();
   readonly tiles: (TileSprite | null)[];
   readonly props: (TileSprite[] | null)[]; // a prop is one sprite, or strips when it covers several cells
+  readonly bridges: (TileSprite | null)[];
   readonly animated = new Set<number>();
   readonly filter = new AlphaFilter({ alpha: 1 });
   y = 0;
@@ -82,6 +85,7 @@ class LayerView {
     this.container.sortableChildren = true;
     this.tiles = new Array(n).fill(null);
     this.props = new Array(n).fill(null);
+    this.bridges = new Array(n).fill(null);
   }
 }
 
@@ -222,7 +226,16 @@ export class MapView {
   }
 
   /** Canvas thumbnails for the palette, drawn with the current skin. */
-  thumb(kind: 'terrain' | 'prop', id: string): HTMLCanvasElement {
+  thumb(kind: 'terrain' | 'prop' | 'bridge', id: string): HTMLCanvasElement {
+    if (kind === 'bridge') {
+      const r = this.skin.renderBridge({ bridge: BRIDGES[id], deck: 1, ground: 0, axis: 0, cont: 0, variant: 0 });
+      const out = makeCanvas(56, 56);
+      const ctx = out.getContext('2d')!;
+      ctx.imageSmoothingEnabled = !this.skin.nearest;
+      const res = r.res ?? 1, sw = 66 * res;
+      ctx.drawImage(r.canvas, r.ax - sw / 2, r.ay - sw * 0.62, sw, sw, 0, 0, 56, 56);
+      return out;
+    }
     const T = terrain(id);
     const r =
       kind === 'terrain'
@@ -333,6 +346,7 @@ export class MapView {
     let s = lv.tiles[i];
     if (!cell) {
       if (s) this.removeSprite(lv, s), (lv.tiles[i] = null);
+      if (lv.bridges[i]) this.removeSprite(lv, lv.bridges[i]!), (lv.bridges[i] = null);
       this.setProp(lv, i, null);
       lv.animated.delete(i);
       return;
@@ -356,6 +370,7 @@ export class MapView {
     s.lift = cell.h * HZ;
     s.bobAmp = T.floating ? 2 : 0;
     this.position(s);
+    this.refreshBridge(lv, layer, x, y, cell.b, T.liquid ? 0 : cell.h, v);
 
     const P = cell.p ? PROPS[cell.p] : null;
     if (P) {
@@ -377,10 +392,10 @@ export class MapView {
         ps.wx = x - (nx - 1) / 2;
         ps.wy = y - (ny - 1) / 2;
         ps.dx = part.dx;
-        ps.lift = cell.h * HZ - (T.liquid ? 2 : 0);
+        ps.lift = (cell.b ? cell.b.h * HZ : cell.h * HZ - (T.liquid ? 2 : 0)) + (P.flies ? FLY_LIFT : 0);
         ps.zr = (Math.max(nx, ny) - 1) / 2;
         ps.zb = 1;
-        ps.bobAmp = P.bob ? 1.5 : s.bobAmp;
+        ps.bobAmp = P.flies ? 3 : P.bob ? 1.5 : s.bobAmp;
         if (!big) (ps.zx = x), (ps.zy = y);
         else {
           const m = part.k < su ? su - 1 - part.k : part.k - su;
@@ -391,6 +406,39 @@ export class MapView {
     } else this.setProp(lv, i, null);
     if (T.animated || P?.animated) lv.animated.add(i);
     else lv.animated.delete(i);
+  }
+
+  /** A bridge deck over the cell: which way it runs on screen and whether it carries on at either end. */
+  private refreshBridge(lv: LayerView, layer: LayerId, x: number, y: number, b: Bridge | undefined, ground: number, variant: number) {
+    const i = y * this.world.w + x;
+    let bs = lv.bridges[i];
+    const B = b && BRIDGES[b.k];
+    if (!b || !B) {
+      if (bs) this.removeSprite(lv, bs), (lv.bridges[i] = null);
+      return;
+    }
+    const axis = (b.a ^ (this.rot & 1)) as 0 | 1;
+    const [u, v] = this.rest(x, y);
+    const joins = (du: number, dv: number) => {
+      const [nx, ny] = this.unrest(u + du, v + dv);
+      const n = this.world.get(layer, nx, ny)?.b;
+      return !!n && n.k === b.k && n.a === b.a && n.h === b.h;
+    };
+    const cont = (axis === 0 ? (joins(-1, 0) ? 1 : 0) | (joins(1, 0) ? 2 : 0) : (joins(0, -1) ? 1 : 0) | (joins(0, 1) ? 2 : 0));
+    const e = this.entry(`b|${b.k}|${b.h}|${ground}|${axis}|${cont}|${variant}`, () =>
+      this.skin.renderBridge({ bridge: B, deck: b.h, ground, axis, cont, variant }),
+    );
+    if (!bs) {
+      bs = new TileSprite(e.tex);
+      lv.bridges[i] = bs;
+      lv.container.addChild(bs);
+    } else bs.texture = e.tex;
+    bs.anchor.set(e.ax, e.ay);
+    bs.wx = bs.zx = x;
+    bs.wy = bs.zy = y;
+    bs.lift = 0;
+    bs.zb = 0.5; // over its own cell's ground, under anything standing on it
+    this.position(bs);
   }
 
   /** Makes sure cell i has exactly `count` prop sprites (null = none) and returns them. */
@@ -440,12 +488,18 @@ export class MapView {
     this.refreshCell(layer, x, y);
     for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
       const n = this.world.get(layer, x + dx, y + dy);
-      if (n && (terrain(n.t).foam || terrain(n.t).road)) this.refreshCell(layer, x + dx, y + dy);
+      if (n && (terrain(n.t).foam || terrain(n.t).road || n.b)) this.refreshCell(layer, x + dx, y + dy);
     }
     if (!after) return;
     const lv = this.layers[layer];
     const i = y * this.world.w + x;
-    if (!before || before.t !== after.t) {
+    if (after.b && (!before?.b || before.b.k !== after.b.k || before.b.h !== after.b.h)) {
+      // a new bridge: each plank drops into place along the span
+      const [u, v] = this.rest(x, y);
+      this.startDrop(lv.bridges[i], ((u + v) % 6) * 35, 22);
+      this.startDrop(lv.props[i], 0, 22);
+      if (layer === this.active) this.burst(x, y, { ...after, h: after.b.h }, BRIDGES[after.b.k]?.colors.deck ?? '#ffffff');
+    } else if (!before || before.t !== after.t) {
       this.startDrop(lv.tiles[i]);
       this.startDrop(lv.props[i]);
       if (layer === this.active) this.burst(x, y, after, terrain(after.t).colors.top);
@@ -479,6 +533,7 @@ export class MapView {
         const i = y * w + x;
         const [u, v] = this.rest(x, y);
         this.startDrop(lv.tiles[i], (u + v) * 9, 26);
+        this.startDrop(lv.bridges[i], (u + v) * 9 + 60, 26);
         this.startDrop(lv.props[i], (u + v) * 9 + 120, 26);
       }
   }
@@ -578,6 +633,7 @@ export class MapView {
       const lv = this.layers[id];
       if (!lv.container.visible) continue;
       for (const s of lv.tiles) if (s) this.position(s);
+      for (const s of lv.bridges) if (s) this.position(s);
       for (const list of lv.props) if (list) for (const s of list) this.position(s);
     }
     if (sp.t < 1) return;
@@ -622,7 +678,7 @@ export class MapView {
         if (dx > TW / 2 || u + v < bestZ) continue;
         const cell = this.world.get(this.active, x, y);
         const T = cell ? terrain(cell.t) : null;
-        const lift = cell ? cell.h * HZ : 0;
+        const lift = cell ? Math.max(cell.h, cell.b?.h ?? 0) * HZ : 0;
         const cy = isoY(u, v);
         const half = (TH / 2) * (1 - dx / (TW / 2));
         const topEdge = cy - lift - half;
@@ -645,7 +701,7 @@ export class MapView {
     for (const { x, y } of cells) {
       const cell = this.world.get(this.active, x, y);
       const [u, v] = this.rest(x, y);
-      const cx = isoX(u, v), cy = isoY(u, v) - (cell ? cell.h * HZ : 0);
+      const cx = isoX(u, v), cy = isoY(u, v) - (cell ? Math.max(cell.h, cell.b?.h ?? 0) * HZ : 0);
       g.poly([cx, cy - TH / 2, cx + TW / 2, cy, cx, cy + TH / 2, cx - TW / 2, cy]).fill({ color, alpha: 0.16 }).stroke({ width: lw, color, alpha: 0.95 });
     }
   }

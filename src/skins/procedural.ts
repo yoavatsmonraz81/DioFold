@@ -1,7 +1,8 @@
 import type { LayerId } from '../core/layers';
 import { hexToNum, hexToRgb, nearest, rgbToHex, type RGB } from './color';
+import { drawBridge } from './bridge';
 import { makeCanvas, paintProp, paintTile, type PaintStyle } from './painter';
-import type { PropRequest, Rendered, Skin, TileRequest } from './types';
+import type { BridgeRequest, PropRequest, Rendered, Skin, TileRequest } from './types';
 
 export interface ProceduralSkinDef {
   id: string;
@@ -43,6 +44,11 @@ export class ProceduralSkin implements Skin {
   renderProp(req: PropRequest): Rendered {
     // code-drawn props already sit small inside their tile, so they only ever grow (for big footprints)
     return this.post(paintProp(req.prop, req.variant, req.frame, this.def.style, Math.max(1, req.width)));
+  }
+
+  renderBridge(req: BridgeRequest): Rendered {
+    const st = this.def.style;
+    return this.post(drawBridge(req, { color: st.color, outline: st.outline, outlineWidth: st.outlineWidth * 0.75, shadeLeft: -st.shadeLeft, shadeRight: -st.shadeRight, res: 1, grain: 0 }));
   }
 
   tint(hex: string): number {
